@@ -1,6 +1,6 @@
 # start_api.py
 #
-# Version: 1.8.0
+# Version: 1.9.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
@@ -90,7 +90,7 @@ def process_table_fields(full_text, rules):
     Recherche le début de chaque article par son numéro de position et son codet,
     puis extrait les informations à l'intérieur de ce bloc.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.8.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.9.0).") # Updated version
     
     table_data = []
     
@@ -103,18 +103,24 @@ def process_table_fields(full_text, rules):
 
     table_content = ""
     if match_table_start:
-        table_content = full_text[match_table_start.end():].strip()
+        # Inclure la ligne d'en-tête et les lignes de séparateurs pour assurer la continuité contextuelle
+        # On peut affiner cela plus tard pour exclure strictement l'en-tête si nécessaire.
+        # Pour l'instant, on prend tout ce qui suit l'en-tête détectée.
+        table_content = full_text[match_table_start.start():].strip() # Prendre un peu avant l'en-tête réelle pour plus de contexte si besoin
         print(f"Texte pour l'analyse de tableau (après en-tête détectée):\n{table_content[:700]}...")
     else:
         print("ATTENTION: Marqueur de début de tableau (en-tête de colonne) non trouvé. Analyse sur le texte brut complet.")
         table_content = full_text
 
     # Regex pour trouver tous les blocs d'articles
+    # Capture le numéro de position (grp 1), le codet (grp 2), et tout le texte du bloc de l'article (grp 3)
+    # MODIFICATION CLÉ: La lookahead de fin de bloc est simplifiée pour ne s'arrêter qu'au prochain article ou fin de string.
     item_block_regex = re.compile(
         r"^\s*(\d{5})\s*" # Group 1: CMDCodetPosition (5 digits)
         r"(\d{7,8})\s*" # Group 2: CMDCodet (7 or 8 digits)
-        r"(.+?)" # Group 3: Entire item block content
-        r"(?=\n\s*\d{5}\s*\d{7,8}|$|\s*Total\s*HT\s*de\s*la\s*commande|Interlocuteur|Consignes d'expédition)"
+        r"(.+?)" # Group 3: Entire item block content (non-greedy)
+        # S'arrête au début du prochain article ou à la fin de la chaîne
+        r"(?=\n\s*\d{5}\s*\d{7,8}|$)" 
         , re.IGNORECASE | re.DOTALL | re.MULTILINE # MULTILINE for ^ and $ to match start/end of lines
     )
     
@@ -135,36 +141,33 @@ def process_table_fields(full_text, rules):
             row_data["CMDCodet"] = codet
 
             print(f"\n--- Bloc d'article trouvé pour Pos {position}, Codet {codet} ---")
-            # print(f"Contenu brut du bloc:\n{item_raw_content[:500]}...") # For detailed debugging
+            print(f"Contenu brut du bloc de l'article:\n{item_raw_content[:500]}...") # For detailed debugging
 
             # --- Extract Quantité, Prix Unitaire, Prix Total using separate regexes ---
             
-            # 1. Extract Total Line Price (last price ending with EUR)
-            # Search from the end of the item_raw_content for the last price.
-            # Using finditer and taking the last one for robustness
-            total_price_matches_list = list(re.finditer(r"(\d+(?:[.,]\d+)?)\s*EUR\s*$", item_raw_content, re.IGNORECASE | re.DOTALL))
-            if total_price_matches_list:
-                total_price_match = total_price_matches_list[-1] # Get the last match object
-                total_line_price_str = total_price_match.group(1).strip()
+            # 1. Extract Total Line Price (last numeric value on its line, potentially without EUR suffix)
+            # Find all numbers that look like prices at the end of lines
+            all_price_candidates_in_block = re.findall(r"(\d+(?:[.,]\d+)?)\s*$", item_raw_content, re.MULTILINE)
+            
+            # Assuming the last two unique values are Total Price and Unit Price
+            # This order is based on observation from the PDF: P.U. HT, then Montant HT.
+            # So, in reversed list order: Total Price, then Unit Price.
+            
+            # Filter unique values and reverse to get highest to lowest (or as they appear last)
+            unique_price_candidates = list(dict.fromkeys(all_price_candidates_in_block)) # Remove duplicates while preserving order
+            
+            if len(unique_price_candidates) >= 2:
+                total_line_price_str = unique_price_candidates[-1] # Last unique numeric value
+                unit_price_str = unique_price_candidates[-2] # Second to last unique numeric value
+            elif len(unique_price_candidates) == 1:
+                total_line_price_str = unique_price_candidates[-1]
+                unit_price_str = None # No distinct unit price found
             else:
                 total_line_price_str = None
-            
-            # 2. Extract Unit Price (price ending with EUR, likely before total price or nearest to "P.U. HT" concept)
-            unit_price_str = None
-            search_content_for_unit_price = item_raw_content
-            if total_price_match:
-                search_content_for_unit_price = item_raw_content[:total_price_match.start()] # Search before total price
-            
-            # Search for the LAST occurrence of a number followed by EUR in the remaining content
-            unit_price_matches_list = list(re.finditer(r"(\d+(?:[.,]\d+)?)\s*EUR", search_content_for_unit_price, re.IGNORECASE | re.DOTALL))
-            if unit_price_matches_list:
-                unit_price_match = unit_price_matches_list[-1] # Get the last match object
-                unit_price_str = unit_price_match.group(1).strip()
+                unit_price_str = None
 
-            # 3. Extract Quantity (number followed by PC, U, UNITE, etc.)
+            # 2. Extract Quantity (number followed by PC, U, UNITE, etc.)
             quantity_str = None
-            # Search for the first occurrence of a number followed by a unit (PC, U, etc.)
-            # We want to be careful not to pick up part of a codet or ref as quantity
             quantity_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:PC|U|UNITE|UNITES)\b", item_raw_content, re.IGNORECASE | re.DOTALL) # \b for word boundary
             if quantity_match:
                 quantity_str = quantity_match.group(1).strip()
@@ -181,15 +184,26 @@ def process_table_fields(full_text, rules):
             # --- Extract and clean Description (CMDCodetNom) ---
             description_raw = item_raw_content
             
-            # Remove matched quantity/price strings and related keywords from description_raw
-            # We must use group(0) which is the full matched string. Replace only first occurrence.
-            if total_price_match:
-                description_raw = description_raw.replace(total_price_match.group(0), '', 1) 
-            if unit_price_match:
-                description_raw = description_raw.replace(unit_price_match.group(0), '', 1)
-            if quantity_match:
-                description_raw = description_raw.replace(quantity_match.group(0), '', 1)
-
+            # Remove numerical values and associated units/currencies from description_raw for cleaner output
+            # Replace the *matched string parts* if they were found, from the description.
+            # This is done by iterating on the parts to remove.
+            
+            elements_to_remove = []
+            if quantity_match: elements_to_remove.append(quantity_match.group(0))
+            if unit_price_str: # Must reconstruct the string from the numeric value and EUR for replacement
+                # This is heuristic, better to remove the exact matched span if possible
+                # For this simple case, try to match the number + EUR if it exists in raw content
+                price_match_candidate = re.search(re.escape(unit_price_str) + r'\s*EUR', item_raw_content, re.IGNORECASE)
+                if price_match_candidate: elements_to_remove.append(price_match_candidate.group(0))
+                else: elements_to_remove.append(unit_price_str) # Fallback to just the number
+            if total_line_price_str: # Same logic for total price
+                price_match_candidate = re.search(re.escape(total_line_price_str) + r'\s*EUR', item_raw_content, re.IGNORECASE)
+                if price_match_candidate: elements_to_remove.append(price_match_candidate.group(0))
+                else: elements_to_remove.append(total_line_price_str) # Fallback to just the number
+            
+            for elem in elements_to_remove:
+                description_raw = description_raw.replace(elem, '', 1) # Replace only the first occurrence
+            
             # Clean up common patterns like "Prix brut", "Appel sur contrat", and separators
             description_raw = re.sub(r"Prix\s*brut", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
             description_raw = re.sub(r"Appel\s*sur\s*contrat\s*CC\d+", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
@@ -206,7 +220,7 @@ def process_table_fields(full_text, rules):
         except Exception as e:
             print(f"Erreur lors du traitement d'un bloc d'article: {e}. Bloc: \n{item_block_match.group(0)[:200]}...")
             # Fallback: Add article with partial data for debugging if an error occurs
-            row_data["CMDCodetNom"] = item_raw_content.replace('\n', ' ') # Keep original for debugging
+            row_data["CMDCodetNom"] = item_raw_content.replace('\n', ' ')
             row_data["CMDCodetQuantity"] = None
             row_data["CMDCodetUnitPrice"] = None
             row_data["CMDCodetTotlaLinePrice"] = None
@@ -220,7 +234,7 @@ def process_table_fields(full_text, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.8.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.9.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
