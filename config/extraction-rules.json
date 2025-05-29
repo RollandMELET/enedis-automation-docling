@@ -30,13 +30,13 @@
     {
       "field_name": "TotalHT",
       "patterns": [
-        "Total\\s*HT\\s*de\\s*la\\s*commande\\s*[\\s\\n]*([\\d\\., ]+)\\s*EUR"
+        "Total\\s*HT\\s*de\\s*la\\s*commande.*?([\\d\\., ]+)\\s*EUR"
       ],
       "type": "float",
       "extract_from": "text_bbox",
       "decimal_separator": ",",
       "thousands_separator": ".",
-      "_comment": "Pattern pour le total HT de la commande (ex: 20.865,78 EUR). Gère les points comme séparateurs de milliers et virgule comme décimal."
+      "_comment": "Pattern pour le total HT de la commande (ex: 20.865,78 EUR). Utilise .*? pour une correspondance non gourmande."
     }
   ],
   "_comment_table_fields": "Cette section définit les règles pour l'extraction des données tabulaires (lignes d'articles). L'implémentation actuelle simule l'extraction de tableau; cette section sera utilisée pour une logique future plus avancée.",
