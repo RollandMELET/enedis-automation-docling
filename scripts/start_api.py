@@ -1,6 +1,6 @@
 # start_api.py
 #
-# Version: 1.12.0
+# Version: 1.13.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
@@ -87,10 +87,8 @@ def process_general_fields(full_text, rules):
 def process_table_fields(full_text, rules):
     """
     Extrait les champs de tableau du texte en utilisant une approche par blocs d'articles.
-    Recherche le début de chaque article par son numéro de position et son codet,
-    puis extrait les informations à l'intérieur de ce bloc.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.12.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.13.0).") # Updated version
     
     table_data = []
     
@@ -98,12 +96,11 @@ def process_table_fields(full_text, rules):
     columns_info = table_rules.get("columns", [])
 
     # Trouver la section du tableau après l'en-tête
-    table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s*HT|Montant\s*HT).*?\n"
+    table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s**HT|Montant\s*HT).*?\n"
     match_table_start = re.search(table_start_marker_regex, full_text, re.IGNORECASE | re.DOTALL)
 
     table_content = ""
     if match_table_start:
-        # On prend tout le texte *à partir* de l'en-tête de tableau jusqu'à la fin du document.
         table_content = full_text[match_table_start.start():].strip() 
         print(f"Texte pour l'analyse de tableau (après en-tête détectée):\n{table_content[:700]}...")
     else:
@@ -145,41 +142,55 @@ def process_table_fields(full_text, rules):
             print(f"\n--- Bloc d'article trouvé pour Pos {position}, Codet {codet} ---")
             print(f"Contenu brut du bloc de l'article (complet):\n{item_raw_content}")
 
-            # --- Extraction des prix et quantité basée sur la structure "Prix brut" ---
-            # Pattern: "Prix brut" (saut de ligne) [Quantité (optionnel)] (saut de ligne) Prix Unitaire (saut de ligne) Prix Total
+            # --- Extraction des prix et quantité ---
             
-            # Pattern pour extraire toutes les valeurs numériques qui ressemblent à des prix.
-            # Gère les séparateurs de milliers (espace, point) et décimaux (virgule, point).
-            price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{2})?"
-
-            # Regex qui englobe la structure complète "Prix brut" + Quantité + PU + Total.
-            # On cherche une correspondance à partir de "Prix brut"
-            full_price_block_regex = re.compile(
-                r"Prix\s*brut\s*" + # Ancre: "Prix brut"
-                r"(?:\n\s*)?" + # Optionnel: ligne vide après "Prix brut"
-                r"(" + price_number_pattern_str + r")\s*(?:PC|U|UNITE|UNITES)?\s*" + # Group 1: Quantité (optionnelle), avec unité
-                r"(?:\n\s*)?" + # Optionnel: ligne vide après quantité
-                r"(" + price_number_pattern_str + r")\s*EUR\s*" + # Group 2: Prix Unitaire
-                r"(?:\n\s*)?" + # Optionnel: ligne vide après Prix Unitaire
-                r"(" + price_number_pattern_str + r")\s*EUR\s*$" # Group 3: Prix Total (jusqu'à la fin de la ligne ou du bloc)
-                , re.IGNORECASE | re.DOTALL | re.MULTILINE
-            )
-            
-            price_extraction_match = full_price_block_regex.search(item_raw_content)
-
-            if price_extraction_match:
-                quantity_str = price_extraction_match.group(1)
-                unit_price_str = price_extraction_match.group(2)
-                total_line_price_str = price_extraction_match.group(3)
-                
-                # Convertir en float
+            # 1. Extraire la Quantité (souvent un nombre suivi de PC, U, etc., n'importe où dans le bloc)
+            quantity_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:PC|U|UNITE|UNITES)\b", item_raw_content, re.IGNORECASE | re.DOTALL) 
+            if quantity_match:
+                quantity_str = quantity_match.group(1).strip()
                 quantity_val = parse_numeric_value(quantity_str)
-                unit_price_val = parse_numeric_value(unit_price_str)
-                total_line_price_val = parse_numeric_value(total_line_price_str)
+            
+            # 2. Extraire les Prix (Unitaire et Total) - Chercher dans la partie après "Prix brut" ou dans les dernières lignes
+            price_start_index = item_raw_content.lower().find("prix brut")
+            if price_start_index != -1:
+                # Si "Prix brut" est trouvé, on cherche les prix dans le texte qui suit.
+                text_after_prix_brut = item_raw_content[price_start_index:].strip()
+                
+                # Regex pour trouver les deux derniers nombres dans la section "après Prix brut"
+                # On utilise price_number_pattern_str pour les nombres.
+                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{2})?"
+                
+                # Trouver tous les nombres potentiels dans cette section
+                all_price_candidates_in_segment = re.findall(
+                    r"(" + price_number_pattern_str + r")",
+                    text_after_prix_brut,
+                    re.IGNORECASE | re.DOTALL
+                )
+                
+                # Convertir en float et filtrer les doublons, en conservant l'ordre d'apparition
+                unique_numeric_values_after_prix_brut = []
+                seen_values_after_prix_brut = set()
+                for s_val in all_price_candidates_in_segment:
+                    f_val = parse_numeric_value(s_val)
+                    if f_val is not None and f_val not in seen_values_after_prix_brut:
+                        unique_numeric_values_after_prix_brut.append(f_val)
+                        seen_values_after_prix_brut.add(f_val)
+                
+                # Heuristique: les 2 derniers nombres uniques sont le Prix Unitaire et le Prix Total
+                if len(unique_numeric_values_after_prix_brut) >= 2:
+                    total_line_price_val = unique_numeric_values_after_prix_brut[-1]
+                    unit_price_val = unique_numeric_values_after_prix_brut[-2]
+                elif len(unique_numeric_values_after_prix_brut) == 1:
+                    total_line_price_val = unique_numeric_values_after_prix_brut[0]
+                    unit_price_val = None
+                else:
+                    total_line_price_val = None
+                    unit_price_val = None
             else:
-                print(f"ATTENTION: Structure 'Prix brut' ou données de prix/quantité non trouvées pour {position}, {codet}.")
+                print(f"ATTENTION: 'Prix brut' non trouvé dans le bloc pour {position}, {codet}. Les prix ne seront pas extraits.")
+                # Fallback: Si "Prix brut" n'est pas trouvé, les prix restent None.
 
-            # Apply parsing rules
+            # Apply parsed values
             row_data["CMDCodetQuantity"] = quantity_val
             row_data["CMDCodetUnitPrice"] = unit_price_val 
             row_data["CMDCodetTotlaLinePrice"] = total_line_price_val 
@@ -187,18 +198,37 @@ def process_table_fields(full_text, rules):
             # --- Extract and clean Description (CMDCodetNom) ---
             description_raw = item_raw_content
             
-            # Retirer la partie du texte qui contient "Prix brut" et les valeurs numériques
-            if price_extraction_match:
-                # Retirer la chaîne exacte qui a matché dans la regex
-                description_raw = description_raw.replace(price_extraction_match.group(0), '', 1) 
+            # Remove detected quantity string occurrences
+            if quantity_match:
+                description_raw = description_raw.replace(quantity_match.group(0), '', 1) 
             
-            # Nettoyage des patterns communs
+            # Remove "Prix brut" and the associated price lines from description_raw
+            if price_start_index != -1:
+                # Try to remove the part from "Prix brut" to the end of prices
+                # This is a bit tricky, but we can try to locate the numerical values (unit and total) in the raw text
+                # and remove them. Given the consistent pattern, we can also remove 'Prix brut' and lines around it.
+                
+                # Remove "Prix brut" itself.
+                description_raw = re.sub(r"Prix\s*brut", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
+                
+                # Remove the actual numerical price strings found if they exist in the raw content
+                if unit_price_val is not None:
+                    # Replace with comma decimal for string comparison/removal
+                    str_val = str(unit_price_val).replace('.',',')
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*EUR\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                if total_line_price_val is not None:
+                    str_val = str(total_line_price_val).replace('.',',')
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*EUR\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+
+            # Nettoyage des patterns communs restants
             description_raw = re.sub(r"Appel\s*sur\s*contrat\s*CC\d+", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
-            description_raw = re.sub(r"________________.*", "", description_raw, flags=re.DOTALL) # Remove lines with underscores
+            description_raw = re.sub(r"________________.*", "", description_raw, flags=re.DOTALL) 
             description_raw = re.sub(r"\n\s*\n", "\n", description_raw) # Remove multiple empty lines
             
             description_raw = description_raw.strip()
-            description_raw = description_raw.replace('\n', ' ') # Ensure single-line output
+            description_raw = description_raw.replace('\n', ' ') 
             row_data["CMDCodetNom"] = description_raw
             
             table_data.append(row_data)
@@ -220,7 +250,7 @@ def process_table_fields(full_text, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.12.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.13.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
