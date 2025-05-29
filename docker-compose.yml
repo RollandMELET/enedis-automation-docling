@@ -7,13 +7,11 @@ services:
     ports:
       - "5001:5000"
     volumes:
-      - ./config:/app/config  # Mappe le dossier config local au conteneur
-      - ./scripts:/app/scripts # Mappe le dossier scripts local au conteneur
-      - ./tests:/app/tests   # Mappe le dossier tests local au conteneur
+      - ./config:/app/config
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
     environment:
-      # Ajoutez ici des variables d'environnement si Docling en a besoin
-      # Pour l'instant, on n'en met pas de spécifiques.
-      FLASK_APP: main.py # On va créer ce fichier Flask API plus tard
+      FLASK_APP: main.py
       FLASK_RUN_HOST: 0.0.0.0
-    command: python /app/scripts/start_api.py # On va créer ce script
+    command: python -u /app/scripts/start_api.py # Force unbuffered output pour les logs
     restart: unless-stopped
