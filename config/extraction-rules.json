@@ -1,4 +1,11 @@
 {
+  "_metadata": {
+    "version": "1.1.0",
+    "last_updated": "2025-05-29",
+    "description": "Règles d'extraction pour les commandes ENEDIS.",
+    "notes": "Les patterns sont des expressions régulières. Les séparateurs décimaux et des milliers sont gérés pour la conversion en float."
+  },
+  "_comment_general_fields": "Cette section définit les règles pour l'extraction des champs d'information généraux (non tabulaires) de la commande.",
   "general_fields": [
     {
       "field_name": "CMDRefEnedis",
@@ -7,38 +14,42 @@
         "N°\\s*([\\d]{4}-[\\d]{10,})"
       ],
       "type": "string",
-      "extract_from": "text_bbox"
+      "extract_from": "text_bbox",
+      "_comment": "Pattern pour la référence de commande ENEDIS (N° 0000-0000000000)."
     },
     {
       "field_name": "CMDDateCommande",
       "patterns": [
         "FRANCK BERNARD\\s*\\n*(\\d{2}\\.\\d{2}\\.\\d{4})"
       ],
-      "type": "string",  
+      "type": "string",
       "extract_from": "text_bbox",
-      "date_format": "%d.%m.%Y"
+      "date_format": "%d.%m.%Y",
+      "_comment": "Pattern pour la date de commande (DD.MM.YYYY) située après la signature."
     },
     {
       "field_name": "TotalHT",
       "patterns": [
-        "Total\\s*HT\\s*de\\s*la\\s*commande\\s*\\n*([\\d,\\. ]+)"
+        "Total\\s*HT\\s*de\\s*la\\s*commande\\s*[\\s\\n]*([\\d\\., ]+)\\s*EUR"
       ],
       "type": "float",
       "extract_from": "text_bbox",
       "decimal_separator": ",",
-      "thousands_separator": "."
+      "thousands_separator": ".",
+      "_comment": "Pattern pour le total HT de la commande (ex: 20.865,78 EUR). Gère les points comme séparateurs de milliers et virgule comme décimal."
     }
   ],
+  "_comment_table_fields": "Cette section définit les règles pour l'extraction des données tabulaires (lignes d'articles). L'implémentation actuelle simule l'extraction de tableau; cette section sera utilisée pour une logique future plus avancée.",
   "table_fields": {
     "start_keywords": ["Quantité", "Qte", "Désignation", "D\\u00e9signation", "P.U. HT", "Montant HT"],
     "end_keywords": ["\\s*Total\\s*HT\\s*:", "\\s*TOTAL\\s*HT\\s*:"],
     "columns": [
-      {"field_name": "CMDCodetPosition", "header_pattern": "Pos", "type": "string"},
-      {"field_name": "CMDCodet", "header_pattern": "Codet", "type": "string"},
-      {"field_name": "CMDCodetNom", "header_pattern": "D\\u00e9signation|Désignation", "type": "string"},
-      {"field_name": "CMDCodetQuantity", "header_pattern": "Quantit\\u00e9|Quantité|Qte", "type": "float", "decimal_separator": ","},
-      {"field_name": "CMDCodetUnitPrice", "header_pattern": "P.U. HT", "type": "float", "decimal_separator": ","},
-      {"field_name": "CMDCodetTotlaLinePrice", "header_pattern": "Montant HT", "type": "float", "decimal_separator": ","}
+      {"field_name": "CMDCodetPosition", "header_pattern": "Pos", "type": "string", "_comment": "Position ou numéro de ligne."},
+      {"field_name": "CMDCodet", "header_pattern": "Codet", "type": "string", "_comment": "Code produit."},
+      {"field_name": "CMDCodetNom", "header_pattern": "D\\u00e9signation|Désignation", "type": "string", "_comment": "Nom ou description du produit."},
+      {"field_name": "CMDCodetQuantity", "header_pattern": "Quantit\\u00e9|Quantité|Qte", "type": "float", "decimal_separator": ",", "_comment": "Quantité de l'article."},
+      {"field_name": "CMDCodetUnitPrice", "header_pattern": "P.U. HT", "type": "float", "decimal_separator": ",", "_comment": "Prix unitaire hors taxe."},
+      {"field_name": "CMDCodetTotlaLinePrice", "header_pattern": "Montant HT", "type": "float", "decimal_separator": ",", "_comment": "Montant total hors taxe pour la ligne d'article."}
     ]
   }
 }
