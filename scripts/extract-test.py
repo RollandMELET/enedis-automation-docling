@@ -1,19 +1,28 @@
+# scripts/extract-test.py
+#
+# Version: 1.1.0
+# Date: 2025-05-30
+# Author: Rolland MELET & AI Senior Coder
+# Description: Script pour envoyer un PDF à l'API Docling déployée et afficher la sortie JSON.
+#              Accepte maintenant un nom de fichier PDF en argument.
+
 import requests
 import json
 import os
-import sys # Importe sys pour exit()
+import sys
 
 # --- Configuration de l'URL de l'API Docling déployée ---
 DOCLING_API_BASE_URL = "https://enedis-automation-docling.rorworld.eu" 
 
-# --- Chemin vers le fichier PDF ENEDIS d'exemple pour le test ---
-# ÉTAPE CRUCIALE : Remplace 'NomDeTonFichierENEDIS.pdf' par le nom exact d'UN de tes PDF ENEDIS réels.
-# Assure-toi que ce fichier est bien placé dans le dossier 'tests/sample-pdfs/' de ton projet.
-PDF_FILE_NAME = "Commande 4801377867JPSM2025-03-19.PDF" # <<< MODIFIE CE NOM DE FICHIER >>>
+# --- Vérification des arguments de ligne de commande ---
+if len(sys.argv) < 2:
+    print("ERREUR: Veuillez spécifier le nom du fichier PDF à tester.")
+    print("Exemple: python3 scripts/extract-test.py 'Commande 4801377867JPSM2025-03-19.PDF'")
+    sys.exit(1) # Quitte le script si aucun argument n'est fourni
+
+PDF_FILE_NAME = sys.argv[1] # Prend le premier argument comme nom de fichier
 
 # Construit le chemin complet du fichier PDF à partir de l'emplacement du script
-# Le script est dans 'scripts/', les PDF sont dans 'tests/sample-pdfs/'
-# donc nous remontons d'un niveau (..) et accédons à 'tests/sample-pdfs/'
 file_path_for_test = os.path.join(os.path.dirname(__file__), '..', 'tests', 'sample-pdfs', PDF_FILE_NAME)
 
 # --- Vérification de l'existence du fichier PDF spécifié ---
@@ -50,8 +59,8 @@ def test_extract_api():
         with open(file_path_for_test, 'rb') as f:
             files = {'file': (os.path.basename(file_path_for_test), f, 'application/pdf')}
             print(f"Envoi du fichier '{os.path.basename(file_path_for_test)}'...")
-            response = requests.post(extract_url, files=files, timeout=60) # Ajout d'un timeout de 60 secondes
-            response.raise_for_status() # Lève une exception pour les codes d'état HTTP d'erreur
+            response = requests.post(extract_url, files=files, timeout=60)
+            response.raise_for_status()
 
             print("Réponse de l'endpoint /extract:")
             print(json.dumps(response.json(), indent=2))
@@ -69,9 +78,7 @@ def test_extract_api():
 
 # --- Exécution principale ---
 if __name__ == "__main__":
-    # Teste l'endpoint /health d'abord pour s'assurer que l'API est accessible
     if test_health_check():
-        # Si le health check réussit, procède à l'extraction
         test_extract_api()
     else:
         print("\nLe health check a échoué. Arrêt du test d'extraction.")
