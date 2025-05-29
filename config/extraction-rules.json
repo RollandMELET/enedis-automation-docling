@@ -1,8 +1,8 @@
 {
   "_metadata": {
-    "version": "1.1.0",
-    "last_updated": "2025-05-29",
-    "description": "Règles d'extraction pour les commandes ENEDIS.",
+    "version": "1.2.0",
+    "last_updated": "2025-05-30",
+    "description": "Règles d'extraction pour les commandes ENEDIS, incluant les champs généraux et les lignes d'articles.",
     "notes": "Les patterns sont des expressions régulières. Les séparateurs décimaux et des milliers sont gérés pour la conversion en float."
   },
   "_comment_general_fields": "Cette section définit les règles pour l'extraction des champs d'information généraux (non tabulaires) de la commande.",
@@ -37,6 +37,82 @@
       "decimal_separator": ",",
       "thousands_separator": ".",
       "_comment": "Pattern pour le total HT de la commande (ex: 20.865,78 EUR). Utilise .*? pour une correspondance non gourmande."
+    },
+    {
+      "field_name": "EnedisCompanyName",
+      "patterns": [
+        "Enedis\\s*\\n*Agence\\s*SERVAL\\s*de\\s*(LYON|ST QUENTIN)"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "_comment": "Nom de l'entreprise Enedis, incluant la localisation de l'agence."
+    },
+    {
+      "field_name": "EnedisCompanyAddress",
+      "patterns": [
+        "Enedis\\s*\\n*(.*?)\\s*dit l'entreprise"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "multiline": true,
+      "_comment": "Adresse complète d'Enedis (bloc multi-lignes)."
+    },
+    {
+      "field_name": "EnedisContactPerson",
+      "patterns": [
+        "Interlocuteur:\\s*(.+?)\\s*\\n*(?:T[eé]l[eé]phone|N/R[eé]f)"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "_comment": "Nom de l'interlocuteur chez Enedis."
+    },
+    {
+      "field_name": "EnedisContactPhone",
+      "patterns": [
+        "T[eé]l[eé]phone\\s*:\\s*(\\d{2}\\s*\\d{2}\\s*\\d{2}\\s*\\d{2}\\s*\\d{2})"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "_comment": "Numéro de téléphone de l'interlocuteur Enedis."
+    },
+    {
+      "field_name": "DuhaldeCompanyName",
+      "patterns": [
+        "Soci[eé]t[eé]\\s*\\n*(.+?)\\s*\\n*PGI"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "_comment": "Nom de l'entreprise Titulaire (Duhalde)."
+    },
+    {
+      "field_name": "DuhaldeCompanyAddress",
+      "patterns": [
+        "Soci[eé]t[eé]\\s*\\n*(?:.+?)\\s*\\n*(.*?)\\s*dit le titulaire"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "multiline": true,
+      "_comment": "Adresse complète du Titulaire (Duhalde)."
+    },
+    {
+      "field_name": "DuhaldeSIRET",
+      "patterns": [
+        "SIRET\\s*:\\s*(\\d{13})"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "_comment": "Numéro SIRET du Titulaire (Duhalde)."
+    },
+    {
+      "field_name": "DeliveryLocationAddress",
+      "patterns": [
+        "Lieu de r[eé]ception\\s*:\\s*\\n*(.*?)(?=\\nMarch[eé]\\s*compl[eé]mentaire|Num[eé]ro\\s*d'affaire\\s*:|\\nConsignes\\s*d'exp[eé]dition)",
+        "Lieu de r[eé]ception\\s*:\\s*\\n*(.*?)(?=\\n\\s*\\n|\\n\\s*FR)"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox",
+      "multiline": true,
+      "_comment": "Adresse complète du lieu de réception (bloc multi-lignes). Utilise un lookahead pour définir la fin du bloc."
     }
   ],
   "_comment_table_fields": "Cette section définit les règles pour l'extraction des données tabulaires (lignes d'articles). L'implémentation actuelle simule l'extraction de tableau; cette section sera utilisée pour une logique future plus avancée.",
