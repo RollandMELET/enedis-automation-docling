@@ -1,6 +1,6 @@
 # start_api.py
 #
-# Version: 1.13.0
+# Version: 1.14.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
@@ -88,7 +88,7 @@ def process_table_fields(full_text, rules):
     """
     Extrait les champs de tableau du texte en utilisant une approche par blocs d'articles.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.13.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.14.0).") # Updated version
     
     table_data = []
     
@@ -96,7 +96,8 @@ def process_table_fields(full_text, rules):
     columns_info = table_rules.get("columns", [])
 
     # Trouver la section du tableau après l'en-tête
-    table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s**HT|Montant\s*HT).*?\n"
+    # CORRECTION ICI: Suppression du double astérisque qui causait l'erreur "multiple repeat"
+    table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s*HT|Montant\s*HT).*?\n"
     match_table_start = re.search(table_start_marker_regex, full_text, re.IGNORECASE | re.DOTALL)
 
     table_content = ""
@@ -153,21 +154,16 @@ def process_table_fields(full_text, rules):
             # 2. Extraire les Prix (Unitaire et Total) - Chercher dans la partie après "Prix brut" ou dans les dernières lignes
             price_start_index = item_raw_content.lower().find("prix brut")
             if price_start_index != -1:
-                # Si "Prix brut" est trouvé, on cherche les prix dans le texte qui suit.
                 text_after_prix_brut = item_raw_content[price_start_index:].strip()
                 
-                # Regex pour trouver les deux derniers nombres dans la section "après Prix brut"
-                # On utilise price_number_pattern_str pour les nombres.
                 price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{2})?"
                 
-                # Trouver tous les nombres potentiels dans cette section
                 all_price_candidates_in_segment = re.findall(
                     r"(" + price_number_pattern_str + r")",
                     text_after_prix_brut,
                     re.IGNORECASE | re.DOTALL
                 )
                 
-                # Convertir en float et filtrer les doublons, en conservant l'ordre d'apparition
                 unique_numeric_values_after_prix_brut = []
                 seen_values_after_prix_brut = set()
                 for s_val in all_price_candidates_in_segment:
@@ -176,7 +172,6 @@ def process_table_fields(full_text, rules):
                         unique_numeric_values_after_prix_brut.append(f_val)
                         seen_values_after_prix_brut.add(f_val)
                 
-                # Heuristique: les 2 derniers nombres uniques sont le Prix Unitaire et le Prix Total
                 if len(unique_numeric_values_after_prix_brut) >= 2:
                     total_line_price_val = unique_numeric_values_after_prix_brut[-1]
                     unit_price_val = unique_numeric_values_after_prix_brut[-2]
@@ -188,7 +183,6 @@ def process_table_fields(full_text, rules):
                     unit_price_val = None
             else:
                 print(f"ATTENTION: 'Prix brut' non trouvé dans le bloc pour {position}, {codet}. Les prix ne seront pas extraits.")
-                # Fallback: Si "Prix brut" n'est pas trouvé, les prix restent None.
 
             # Apply parsed values
             row_data["CMDCodetQuantity"] = quantity_val
@@ -204,28 +198,20 @@ def process_table_fields(full_text, rules):
             
             # Remove "Prix brut" and the associated price lines from description_raw
             if price_start_index != -1:
-                # Try to remove the part from "Prix brut" to the end of prices
-                # This is a bit tricky, but we can try to locate the numerical values (unit and total) in the raw text
-                # and remove them. Given the consistent pattern, we can also remove 'Prix brut' and lines around it.
-                
-                # Remove "Prix brut" itself.
                 description_raw = re.sub(r"Prix\s*brut", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
                 
                 # Remove the actual numerical price strings found if they exist in the raw content
                 if unit_price_val is not None:
-                    # Replace with comma decimal for string comparison/removal
                     str_val = str(unit_price_val).replace('.',',')
-                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*EUR\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
-                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'(?:\s*EUR)?\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
                 if total_line_price_val is not None:
                     str_val = str(total_line_price_val).replace('.',',')
-                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*EUR\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
-                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                    description_raw = re.sub(r'\s*' + re.escape(str_val) + r'(?:\s*EUR)?\s*$', '', description_raw, flags=re.IGNORECASE | re.MULTILINE)
 
             # Nettoyage des patterns communs restants
             description_raw = re.sub(r"Appel\s*sur\s*contrat\s*CC\d+", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
             description_raw = re.sub(r"________________.*", "", description_raw, flags=re.DOTALL) 
-            description_raw = re.sub(r"\n\s*\n", "\n", description_raw) # Remove multiple empty lines
+            description_raw = re.sub(r"\n\s*\n", "\n", description_raw) 
             
             description_raw = description_raw.strip()
             description_raw = description_raw.replace('\n', ' ') 
@@ -250,7 +236,7 @@ def process_table_fields(full_text, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.13.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.14.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
