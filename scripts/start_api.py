@@ -57,9 +57,6 @@ def extract_text_with_ocr(image):
 def parse_numeric_value(value_str, decimal_sep=',', thousands_sep=' '):
     if value_str is None:
         return None
-    # Normalize decimal separator to '.' for float conversion.
-    # Handles both comma and dot as decimal, and space/dot as thousands.
-    # We remove thousands separators first, then replace the decimal one.
     cleaned_value = value_str.replace(thousands_sep, '').replace(decimal_sep, '.') 
     try:
         return float(cleaned_value)
@@ -85,28 +82,19 @@ def process_general_fields(full_text, rules):
         extracted_data[field_name] = value
     return extracted_data
 
-def process_table_fields(full_text, rules):
+def process_table_fields(full_text_for_table, rules): # Renommé pour clarté
     """
-    Extrait les champs de tableau du texte en utilisant une approche par blocs d'articles.
+    Extrait les champs de tableau du texte pré-nettoyé.
     """
     print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.16.0).") # Updated version
     
     table_data = []
     
     table_rules = rules.get("table_fields", {})
-    columns_info = rules.get("columns", []) # Changed to rules.get("columns")
+    columns_info = table_rules.get("columns", [])
 
-    # Trouver la section du tableau après l'en-tête
-    table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s*HT|Montant\s*HT).*?\n"
-    match_table_start = re.search(table_start_marker_regex, full_text, re.IGNORECASE | re.DOTALL)
-
-    table_content = ""
-    if match_table_start:
-        table_content = full_text[match_table_start.start():].strip() 
-        print(f"Texte pour l'analyse de tableau (après en-tête détectée):\n{table_content[:700]}...")
-    else:
-        print("ATTENTION: Marqueur de début de tableau (en-tête de colonne) non trouvé. Analyse sur le texte brut complet.")
-        table_content = full_text
+    # Ici, full_text_for_table est déjà le texte pertinent (sans en-têtes/pieds de page globaux)
+    table_content = full_text_for_table 
 
     # Utiliser re.split pour découper le contenu en blocs d'articles fiables.
     item_start_delimiter_regex = re.compile(
@@ -141,68 +129,56 @@ def process_table_fields(full_text, rules):
             row_data["CMDCodet"] = codet
 
             print(f"\n--- Bloc d'article trouvé pour Pos {position}, Codet {codet} ---")
-            print(f"Contenu brut du bloc de l'article (complet):\n{item_raw_content}") # Will print the full content
-            
-            # --- DEBUGGING PRINTS ---
-            print("--- Début du débogage des prix/quantités ---")
+            print(f"Contenu brut du bloc de l'article (complet):\n{item_raw_content}")
 
+            # --- Extraction des prix et quantité ---
+            
             # 1. Extraire la Quantité (souvent un nombre suivi de PC, U, etc., n'importe où dans le bloc)
             quantity_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:PC|U|UNITE|UNITES)\b", item_raw_content, re.IGNORECASE | re.DOTALL) 
             if quantity_match:
                 quantity_str = quantity_match.group(1).strip()
                 quantity_val = parse_numeric_value(quantity_str)
-                print(f"Quantité trouvée (str): {quantity_str}, (val): {quantity_val}")
-            else:
-                print("Quantité non trouvée.")
-
-            # 2. Extraire les Prix (Unitaire et Total) - Chercher dans la partie après "Prix brut" ou dans les dernières lignes
-            price_start_index = item_raw_content.lower().find("prix brut")
-            if price_start_index != -1:
-                print(f"'Prix brut' trouvé à l'index: {price_start_index}")
-                text_after_prix_brut = item_raw_content[price_start_index:].strip()
-                print(f"Texte après 'Prix brut':\n{text_after_prix_brut}")
+            
+            # 2. Extraire les Prix (Unitaire et Total) - Chercher dans la partie après "Prix brut"
+            # Utiliser une regex plus souple pour "Prix brut"
+            price_start_match = re.search(r"Prix\s*brut", item_raw_content, re.IGNORECASE | re.DOTALL)
+            
+            if price_start_match:
+                # Si "Prix brut" est trouvé, on cherche les prix dans le texte qui suit.
+                text_after_prix_brut = item_raw_content[price_start_match.end():].strip()
                 
                 # Pattern pour extraire toutes les valeurs numériques qui ressemblent à des prix.
                 # Gère les séparateurs de milliers (espace, point) et décimaux (virgule, point).
-                # IMPORTANT: Only capture the number, not EUR/PC/U as they might not be consistently present.
-                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{2})?"
-                
-                all_raw_price_strings_in_segment = re.findall(
-                    r"(" + price_number_pattern_str + r")", # Capture only the number string
+                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d{2})?" # Allow optional decimal for 1,00 format too
+
+                # Trouver tous les nombres potentiels dans cette section
+                all_price_candidates_in_segment = re.findall(
+                    r"(" + price_number_pattern_str + r")",
                     text_after_prix_brut,
                     re.IGNORECASE | re.DOTALL
                 )
-                print(f"Tous les candidats prix bruts trouvés dans le segment: {all_raw_price_strings_in_segment}")
                 
                 # Convertir en float et filtrer les doublons, en conservant l'ordre d'apparition
-                unique_numeric_values_after_prix_brut = []
-                seen_values_after_prix_brut = set()
-                for s_val in all_raw_price_strings_in_segment:
-                    f_val = parse_numeric_value(s_val)
-                    if f_val is not None and f_val not in seen_values_after_prix_brut:
-                        unique_numeric_values_after_prix_brut.append(f_val)
-                        seen_values_after_prix_brut.add(f_val)
-                print(f"Valeurs numériques uniques parsées après 'Prix brut': {unique_numeric_values_after_prix_brut}")
+                parsed_price_values_from_segment = [
+                    parse_numeric_value(s_val) for s_val in all_price_candidates_in_segment 
+                    if parse_numeric_value(s_val) is not None
+                ]
                 
-                # Heuristique: les 2 derniers nombres uniques sont le Prix Unitaire et le Prix Total
-                if len(unique_numeric_values_after_prix_brut) >= 2:
-                    total_line_price_val = unique_numeric_values_after_prix_brut[-1]
-                    unit_price_val = unique_numeric_values_after_prix_brut[-2]
-                    print(f"Dédution: Total={total_line_price_val}, Unit={unit_price_val}")
-                elif len(unique_numeric_values_after_prix_brut) == 1:
-                    total_line_price_val = unique_numeric_values_after_prix_brut[0]
-                    # If quantity is 1 and only one price is found, assume it's both Unit and Total price.
-                    if quantity_val == 1.0: # Check if quantity is explicitly 1.0
-                        unit_price_val = parsed_price_values_from_segment[0] # Note: This needs parsed_price_values_from_segment to be defined or re-extracted. Let's simplify this part.
-                        # It should be unit_price_val = unique_numeric_values_after_prix_brut[0]
-                        unit_price_val = unique_numeric_values_after_prix_brut[0]
+                # Heuristique: le dernier nombre est le Total, l'avant-dernier est le Prix Unitaire.
+                # Cette heuristique est appliquée même si les valeurs sont identiques.
+                if len(parsed_price_values_from_segment) >= 2:
+                    total_line_price_val = parsed_price_values_from_segment[-1]
+                    unit_price_val = parsed_price_values_from_segment[-2]
+                elif len(parsed_price_values_from_segment) == 1:
+                    total_line_price_val = parsed_price_values_from_segment[0]
+                    # CORRECTION BUG: Utiliser la liste correcte pour l'affectation ici
+                    if quantity_val == 1.0 and parsed_price_values_from_segment: 
+                        unit_price_val = parsed_price_values_from_segment[0]
                     else:
                         unit_price_val = None 
-                    print(f"Dédution: Total={total_line_price_val}, Unit={unit_price_val} (single price found)")
                 else:
                     total_line_price_val = None
                     unit_price_val = None
-                    print("Dédution: Pas assez de prix trouvés.")
             else:
                 print(f"ATTENTION: 'Prix brut' non trouvé dans le bloc pour {position}, {codet}. Les prix ne seront pas extraits.")
 
@@ -210,30 +186,38 @@ def process_table_fields(full_text, rules):
             row_data["CMDCodetQuantity"] = quantity_val
             row_data["CMDCodetUnitPrice"] = unit_price_val 
             row_data["CMDCodetTotlaLinePrice"] = total_line_price_val 
-            print("--- Fin du débogage des prix/quantités ---")
 
             # --- Extract and clean Description (CMDCodetNom) ---
             description_raw = item_raw_content
             
-            # Remove detected quantity string occurrences
+            # Remove detected quantity string occurrences. Use original matched string for removal.
             if quantity_match:
                 description_raw = description_raw.replace(quantity_match.group(0), '', 1) 
             
             # Remove "Prix brut" and the associated price lines from description_raw
-            if price_start_index != -1:
+            if price_start_match: # Check if "Prix brut" was found to proceed with removal
                 description_raw = re.sub(r"Prix\s*brut", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
                 
                 # Remove the actual numerical price strings found if they exist in the raw content
-                # It's better to remove the exact matched span if available.
-                # We need the original strings that were found, not the float values.
-                # So, we'll iterate through all_raw_price_strings_in_segment and remove those.
+                # To be robust, use the exact string representations that were parsed, with optional EUR suffix.
+                # Sort elements to remove by length (longest first) to avoid partial replacements.
                 
-                # Remove strings found after "Prix brut"
-                for s_val_raw in all_raw_price_strings_in_segment:
-                    # Remove it only if it's found in the description (might have been removed already if it's a duplicate)
+                elements_to_remove_from_description = []
+                # Use str.replace('.',',') to match the PDF text format
+                if unit_price_val is not None:
+                    elements_to_remove_from_description.append(str(unit_price_val).replace('.',',') + r'\s*EUR') # With EUR
+                    elements_to_remove_from_description.append(str(unit_price_val).replace('.',',')) # Without EUR
+                if total_line_price_val is not None:
+                    elements_to_remove_from_description.append(str(total_line_price_val).replace('.',',') + r'\s*EUR') # With EUR
+                    elements_to_remove_from_description.append(str(total_line_price_val).replace('.',',')) # Without EUR
+                
+                # Sort longest first for safe replacement
+                elements_to_remove_from_description.sort(key=len, reverse=True)
+
+                for elem_to_remove in elements_to_remove_from_description:
                     # Use re.sub with re.escape to handle special characters in numbers like '.' or ','
-                    # Use a flexible pattern to also remove optional EUR/units that were part of its context.
-                    description_raw = re.sub(r'\s*' + re.escape(s_val_raw) + r'(?:\s*EUR)?(?:\s*PC|\s*U|\s*UNITE|\s*UNITES)?\s*$', ' ', description_raw, flags=re.IGNORECASE | re.MULTILINE)
+                    # Replace globally to catch all occurrences if they were somehow duplicated
+                    description_raw = re.sub(r'\s*' + re.escape(elem_to_remove) + r'\s*', ' ', description_raw, flags=re.IGNORECASE | re.MULTILINE)
                     # Clean up multiple spaces after replacement
                     description_raw = re.sub(r'\s{2,}', ' ', description_raw)
 
@@ -287,15 +271,44 @@ def extract_document():
             print(full_text)
             print("--- FIN DU TEXTE BRUT DU PDF ---")
 
-            if not full_text.strip():
-                print("Texte PDF vide, une logique d'OCR serait appliquée ici pour les PDF scannés.")
+            # --- NOUVELLE ÉTAPE DE PRÉ-TRAITEMENT POUR ISOLER LE CONTENU PERTINENT ---
+            full_text_cleaned = full_text # Initialiser avec le texte complet
+            
+            # 1. Trouver le début de la section du contenu principal / tableau
+            # Chercher le début de la première page de commande ou le premier en-tête de tableau
+            # On cherche de manière plus souple pour ne pas rater des pages sans ce pattern strict.
+            main_content_start_marker = r"(?:Commande de livraison\s*N°\s*\d{4}-\d{10,}|D\u00e9signation\s*Quantit\u00e9\s*\|\s*P\.U\.\s*HT\s*Montant\s*HT)"
+            match_main_content_start = re.search(main_content_start_marker, full_text, re.IGNORECASE | re.DOTALL)
+            
+            if match_main_content_start:
+                # Commencer le texte nettoyé à partir de la première occurrence de ce marqueur
+                # Inclure la ligne du marqueur pour que process_table_fields puisse le retrouver.
+                full_text_cleaned = full_text[match_main_content_start.start():].strip()
+            else:
+                print("ATTENTION: Marqueur de début de contenu principal/tableau non trouvé. Traitement du texte complet.")
+
+            # 2. Trouver la fin de la section du contenu principal (avant le pied de page)
+            # Les pieds de page contiennent typiquement "Enedis, SA" ou "PAGE X / Y".
+            footer_start_regex = r"(?:Enedis,\s*SA\s*à\s*directoire|PAGE\s*\d+\s*\/\s*\d+)"
+            match_footer_start = re.search(footer_start_regex, full_text_cleaned, re.IGNORECASE | re.DOTALL)
+            if match_footer_start:
+                # Tronquer le texte nettoyé juste avant le début du pied de page
+                full_text_cleaned = full_text_cleaned[:match_footer_start.start()].strip()
+                print("INFO: Document content truncated before footer.")
+            else:
+                print("INFO: No footer detected for truncation.")
+
+
+            if not full_text_cleaned.strip():
+                print("Texte PDF vide ou trop nettoyé, une logique d'OCR serait appliquée ici pour les PDF scannés.")
 
         except Exception as e:
             print(f"Erreur lors de la lecture du PDF avec pdfminer.six: {e}. Le document est peut-être scanné ou corrompu.")
-            full_text = ""
+            full_text_cleaned = "" # Réinitialiser le texte nettoyé en cas d'erreur de lecture
+            full_text = "" # S'assurer que le full_text est vide aussi si la lecture échoue
         
-        general_data = process_general_fields(full_text, extraction_rules)
-        line_items_data = process_table_fields(full_text, extraction_rules) 
+        general_data = process_general_fields(full_text, extraction_rules) # Utilise le full_text original pour les champs généraux (souvent en en-tête/pied de page)
+        line_items_data = process_table_fields(full_text_cleaned, extraction_rules) # Utilise le texte nettoyé pour le traitement du tableau
 
         extracted_output = {
             "CMDRefEnedis": general_data.get("CMDRefEnedis"),
