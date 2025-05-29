@@ -16,21 +16,29 @@ RULES_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'extra
 # Chargement des règles d'extraction au démarrage de l'application
 extraction_rules = {}
 if os.path.exists(RULES_FILE_PATH):
-    with open(RULES_FILE_PATH, 'r', encoding='utf-8') as f:
-        extraction_rules = json.load(f)
-    print(f"Règles d'extraction chargées depuis: {RULES_FILE_PATH}")
+    try:
+        with open(RULES_FILE_PATH, 'r', encoding='utf-8') as f:
+            extraction_rules = json.load(f)
+        print(f"Règles d'extraction chargées depuis: {RULES_FILE_PATH}")
+    except json.JSONDecodeError as e:
+        print(f"ERREUR: Erreur de format JSON dans '{RULES_FILE_PATH}': {e}. L'extraction sera vide.")
+    except Exception as e:
+        print(f"ERREUR: Impossible de charger les règles '{RULES_FILE_PATH}': {e}. L'extraction sera vide.")
 else:
     print(f"ATTENTION: Fichier de règles '{RULES_FILE_PATH}' introuvable. L'extraction sera vide.")
 
 # --- Fonctions d'extraction ---
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_stream):
     """Extrait tout le texte d'un PDF en utilisant pdfminer.six."""
     text_content = ""
-    for page_layout in extract_pages(pdf_path):
+    # Réinitialise le stream au début pour la lecture par pdfminer.six
+    pdf_stream.seek(0)
+    for page_layout in extract_pages(pdf_stream):
         for element in page_layout:
             if isinstance(element, LTTextContainer):
                 text_content += element.get_text() + "\n"
+    pdf_stream.seek(0) # Réinitialise le stream à nouveau si d'autres lectures sont prévues
     return text_content
 
 def extract_text_with_ocr(image):
@@ -48,39 +56,33 @@ def process_general_fields(full_text, rules):
         value = None
         for pattern_str in patterns:
             # Utilise re.IGNORECASE pour une recherche insensible à la casse
-            match = re.search(pattern_str, full_text, re.IGNORECASE)
+            # re.DOTALL permet à . de correspondre à tout caractère, y compris le retour à la ligne
+            match = re.search(pattern_str, full_text, re.IGNORECASE | re.DOTALL)
             if match:
                 value = match.group(1).strip()
                 if rule["type"] == "float":
                     value = value.replace('.', '').replace(',', '.') # Gère les séparateurs décimaux
-                    value = float(value)
-                # Ajout de la gestion du format de date
-                if rule["type"] == "date" and "date_format" in rule:
                     try:
-                        # Tente de parser et de reformater la date si nécessaire
-                        # Ici, nous retournons la date telle qu'extraite pour la simplicité,
-                        # la conversion de format peut être faite dans n8n si plus complexe.
-                        pass # On garde la string pour l'instant
+                        value = float(value)
                     except ValueError:
-                        pass # Laisser comme string si le format ne correspond pas
-                break # Une fois un match trouvé, on passe à la règle suivante
+                        value = None # Garde la valeur None si la conversion échoue
+                # Ajout de la gestion du format de date (ici on garde la string, la conversion peut être faite dans n8n)
+                # ou tu peux ajouter une conversion ici si tu veux un objet date précis
+                break # Une fois un match trouvé, on passe à la règle suivante (pour ce champ)
         extracted_data[field_name] = value
     return extracted_data
 
 def process_table_fields(full_text, rules):
     """Extrait les champs de tableau du texte."""
-    # C'est une simplification pour le début.
-    # L'extraction de tableaux est complexe et nécessiterait une logique plus robuste.
-    # Ici, nous allons simuler en cherchant des lignes entre les mots clés de début et de fin.
-    
+    # Cette fonction est une simplification pour le début.
+    # L'extraction de tableaux est complexe et nécessiterait une logique plus robuste,
+    # potentiellement basée sur des positions (bounding boxes) plutôt que juste du texte brut.
     # Pour une véritable implémentation de Docling, cela impliquerait:
     # - Détection des régions de tableau dans le PDF (bounding boxes).
     # - Extraction du texte et de la position des caractères.
     # - Reconstitution des lignes et colonnes du tableau.
     # - Adaptation à différentes structures de tableaux.
 
-    # Pour le MVP, on se contente de la logique de simulation existante ou d'une recherche textuelle très basique.
-    # Puisque nous avons un placeholder, on retourne les données simulées.
     print("INFO: L'extraction de tableau est actuellement simulée. La logique Docling réelle sera implémentée ici.")
     
     # Retourne les données simulées comme avant pour garder le contrat de l'API.
@@ -122,41 +124,31 @@ def extract_document():
     if file:
         file_stream = io.BytesIO(file.read())
         
+        full_text = ""
         try:
-            # 1. Tenter d'extraire le texte directement (si PDF textuel)
+            # Tenter d'extraire le texte directement (si PDF textuel)
             full_text = extract_text_from_pdf(file_stream)
             print(f"Texte extrait directement (longueur: {len(full_text)}).")
 
-            # Si l'extraction de texte est vide ou insuffisante, on pourrait envisager l'OCR.
-            # Pour le test initial, on va quand même simuler la réponse même si le texte est là.
-            # Une vraie logique vérifierait la pertinence du texte ou si des images sont présentes.
-            if not full_text.strip(): # Si le PDF est vide ou juste des espaces, tenter l'OCR
-                print("Texte PDF vide, tentative d'OCR.")
-                # Revenir au début du stream pour lire comme une image si nécessaire
-                file_stream.seek(0)
-                # Note: L'OCR direct d'un PDF complet n'est pas simple.
-                # Pour la robustesse, on convertirait chaque page en image et on ferait de l'OCR.
-                # Pour ce placeholder, nous allons simplifier et toujours simuler pour l'extraction.
-                # La complexité de la conversion PDF->Image->OCR pour chaque page
-                # est au-delà du scope du placeholder et serait ajoutée dans l'implémentation réelle de Docling.
-                # Pour l'instant, on assume que la logique de Docling gérera cela.
-                
-                # Placeholder pour l'OCR de l'image (non implémenté ici directement pour PDF entier)
-                # Si c'était une image directement, on ferait:
+            # Optionnel: Si le texte est très court ou vide, tenter l'OCR
+            # Pour l'instant, on assume que si le texte est là, on l'utilise.
+            # L'implémentation de l'OCR pour les PDF scannés est plus complexe
+            # (nécessite la conversion page par page en image, puis OCR).
+            # Cette logique est pour l'implémentation réelle de Docling.
+            if not full_text.strip():
+                print("Texte PDF vide, une logique d'OCR serait appliquée ici pour les PDF scannés.")
+                # Si le document était une image directement, on pourrait faire:
                 # image = Image.open(file_stream)
-                # ocr_text = extract_text_with_ocr(image)
-                # print(f"Texte extrait par OCR (longueur: {len(ocr_text)}).")
-                # full_text = ocr_text # Utiliser le texte OCR
+                # full_text = extract_text_with_ocr(image)
 
         except Exception as e:
             print(f"Erreur lors de la lecture du PDF avec pdfminer.six: {e}. Le document est peut-être scanné ou corrompu.")
-            # Fallback potentiel: forcer l'OCR si lecture de texte échoue
-            # Pour cet exemple, nous allons juste simuler.
-            full_text = "" # S'assurer que full_text est vide pour le fallback simulé
+            full_text = "" # Réinitialise le texte en cas d'erreur pour que les règles ne trouvent rien
         
         # Application des règles d'extraction
         general_data = process_general_fields(full_text, extraction_rules)
-        line_items_data = process_table_fields(full_text, extraction_rules) # Ceci est actuellement simulé
+        # La ligne d'articles est TOUJOURS simulée pour le moment, quelle que soit l'extraction de texte.
+        line_items_data = process_table_fields(full_text, extraction_rules) 
 
         # Construction de la réponse finale
         extracted_output = {
@@ -166,15 +158,11 @@ def extract_document():
             "line_items": line_items_data,
             "confidence_score": 0.85, # Score de confiance simulé
             "extracted_from": file.filename,
-            "extraction_method": "Simulated/Placeholder"
+            "extraction_method": "Textual PDF processing" if full_text.strip() else "Simulated/Placeholder (Text extraction failed or empty)"
         }
         
-        # Gérer les cas où l'extraction est vide
-        if not extracted_output["CMDRefEnedis"]:
-             extracted_output["extraction_method"] = "Simulated/Placeholder (Empty text extraction)"
-             # Fallback logic would go here if text extraction failed and we needed to OCR
-             # For now, we just return the dummy data.
-
         return jsonify(extracted_output), 200
-    if name == 'main':
-app.run(host='0.0.0.0', port=5000)
+
+# Le point d'entrée de l'application Flask
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
