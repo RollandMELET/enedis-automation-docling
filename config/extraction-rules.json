@@ -1,0 +1,43 @@
+{
+  "general_fields": [
+    {
+      "field_name": "CMDRefEnedis",
+      "patterns": [
+        "N\\u00b0\\s*([\\d]{4}-[\\d]{10,})"
+      ],
+      "type": "string",
+      "extract_from": "text_bbox"
+    },
+    {
+      "field_name": "CMDDateCommande",
+      "patterns": [
+        "du\\s*(\\d{2}/\\d{2}/\\d{4})"
+      ],
+      "type": "date",
+      "extract_from": "text_bbox",
+      "date_format": "%d/%m/%Y"
+    },
+    {
+      "field_name": "CMDTotalHT",
+      "patterns": [
+        "TOTAL\\s*HT\\s*:\\s*([\\d,\\.]+)E",
+        "Total\\s*HT\\s*:\\s*([\\d,\\.]+)"
+      ],
+      "type": "float",
+      "extract_from": "text_bbox",
+      "decimal_separator": ","
+    }
+  ],
+  "table_fields": {
+    "start_keywords": ["Quantité", "Qte", "Désignation", "D\\u00e9signation", "P.U. HT", "Montant HT"],
+    "end_keywords": ["\\s*Total\\s*HT\\s*:", "\\s*TOTAL\\s*HT\\s*:"],
+    "columns": [
+      {"field_name": "CMDCodetPosition", "header_pattern": "Pos", "type": "string"},
+      {"field_name": "CMDCodet", "header_pattern": "Codet", "type": "string"},
+      {"field_name": "CMDCodetNom", "header_pattern": "D\\u00e9signation|Désignation", "type": "string"},
+      {"field_name": "CMDCodetQuantity", "header_pattern": "Quantit\\u00e9|Quantité|Qte", "type": "float", "decimal_separator": ","},
+      {"field_name": "CMDCodetUnitPrice", "header_pattern": "P.U. HT", "type": "float", "decimal_separator": ","},
+      {"field_name": "CMDCodetTotlaLinePrice", "header_pattern": "Montant HT", "type": "float", "decimal_separator": ","}
+    ]
+  }
+}
