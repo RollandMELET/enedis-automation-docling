@@ -1,0 +1,13 @@
+# Fichiers spécifiques à macOS
+.DS_Store
+
+# Fichiers d'environnement Python
+__pycache__/
+.venv/
+venv/
+
+# Logs et fichiers temporaires
+*.log
+*.tmp
+*.bak
+dummy_command_test.pdf # Pour ignorer le fichier PDF temporaire créé par le script
