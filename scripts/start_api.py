@@ -1,11 +1,10 @@
 # start_api.py
 #
-# Version: 1.19.0
+# Version: 1.20.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
-#              Initialise les règles d'extraction, gère la lecture des PDF et l'application des règles.
-#              Expose un endpoint /health et un endpoint /extract pour le traitement des documents.
+#              Version avec logs de débogage étendus pour diagnostiquer le problème de nettoyage.
 
 from flask import Flask, request, jsonify
 import os
@@ -63,14 +62,8 @@ def parse_numeric_value(value_str):
     # Remove all spaces and dots as thousands separators.
     # Heuristic: assume dot is thousands, comma is decimal for European format (X.XXX,XX)
     cleaned_value = value_str.replace(' ', '') # Remove spaces first
-    
-    # Handle cases like "1.000" where dot might be decimal or thousands.
-    # Assume dot is thousands unless it's the only one and not followed by enough digits (e.g. "1.00" -> 1.0)
-    # For now, remove all dots assuming they are thousands separators.
-    cleaned_value = cleaned_value.replace('.', '') 
-
-    # Replace comma (decimal) with dot for float conversion
-    cleaned_value = cleaned_value.replace(',', '.') 
+    cleaned_value = cleaned_value.replace('.', '') # Remove dots (thousands)
+    cleaned_value = cleaned_value.replace(',', '.') # Replace comma with dot for decimal
 
     try:
         return float(cleaned_value)
@@ -98,15 +91,16 @@ def process_table_fields(full_text_for_table, rules):
     """
     Extrait les champs de tableau du texte pré-nettoyé page par page.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.19.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.20.0)")
     
     table_data = []
     
     table_rules = rules.get("table_fields", {})
-    columns_info = table_rules.get("columns", []) # CORRECTION BUG: maintenant prend depuis table_rules
+    columns_info = table_rules.get("columns", [])
 
     table_content = full_text_for_table 
-    print(f"DEBUG: Contenu de table_content avant split:\n{table_content[:700]}...")
+    print(f"DEBUG: Longueur du contenu pour le tableau: {len(table_content)}")
+    print(f"DEBUG: Contenu complet pour le tableau:\n{table_content}")
 
     # Utiliser re.split pour découper le contenu en blocs d'articles fiables.
     item_start_delimiter_regex = re.compile(
@@ -115,6 +109,8 @@ def process_table_fields(full_text_for_table, rules):
     )
 
     split_parts = item_start_delimiter_regex.split(table_content)
+    
+    print(f"DEBUG: Nombre de parties après split: {len(split_parts)}")
     
     raw_item_blocks = []
     if split_parts and len(split_parts) > 1:
@@ -125,6 +121,7 @@ def process_table_fields(full_text_for_table, rules):
                     "codet": split_parts[i+1],
                     "content": split_parts[i+2].strip()
                 })
+    
     print(f"DEBUG: Nombre de blocs d'articles trouvés: {len(raw_item_blocks)}")
 
     for item_raw_data in raw_item_blocks:
@@ -146,7 +143,7 @@ def process_table_fields(full_text_for_table, rules):
 
             print("--- Début du débogage des prix/quantités ---") 
             
-            # 1. Extraire la Quantité (souvent un nombre suivi de PC, U, etc., n'importe où dans le bloc)
+            # 1. Extraire la Quantité
             quantity_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:PC|U|UNITE|UNITES)\b", item_raw_content, re.IGNORECASE | re.DOTALL) 
             if quantity_match:
                 quantity_str = quantity_match.group(1).strip()
@@ -155,7 +152,7 @@ def process_table_fields(full_text_for_table, rules):
             else:
                 print("Quantité: Non trouvée.")
             
-            # 2. Extraire les Prix (Unitaire et Total) - Chercher dans la partie après "Prix brut"
+            # 2. Extraire les Prix
             price_start_match = re.search(r"Prix\s*brut", item_raw_content, re.IGNORECASE | re.DOTALL)
             
             all_raw_price_strings_in_segment = []
@@ -166,9 +163,7 @@ def process_table_fields(full_text_for_table, rules):
                 text_after_prix_brut = item_raw_content[price_start_match.end():].strip()
                 print(f"Texte après 'Prix brut':\n{text_after_prix_brut}")
                 
-                # CORRECTION REGEX: `price_number_pattern_str` doit être la même que `parse_numeric_value` s'attend.
-                # On capture les nombres avec points ou virgules, qu'on nettoiera avec parse_numeric_value.
-                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?" # Capture numbers like 1.000,00 or 1000.00 or 1,00
+                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?"
 
                 all_raw_price_strings_in_segment = re.findall(
                     r"(" + price_number_pattern_str + r")",
@@ -189,18 +184,18 @@ def process_table_fields(full_text_for_table, rules):
                 if len(parsed_price_values_from_segment) >= 2:
                     total_line_price_val = parsed_price_values_from_segment[-1]
                     unit_price_val = parsed_price_values_from_segment[-2]
-                    print(f"Dédution: Total={total_line_price_val}, Unit={unit_price_val}")
+                    print(f"Déduction: Total={total_line_price_val}, Unit={unit_price_val}")
                 elif len(parsed_price_values_from_segment) == 1:
                     total_line_price_val = parsed_price_values_from_segment[0]
                     if quantity_val == 1.0: 
                         unit_price_val = parsed_price_values_from_segment[0]
                     else:
                         unit_price_val = None 
-                    print(f"Dédution: Total={total_line_price_val}, Unit={unit_price_val} (single value, Qty=1 check)")
+                    print(f"Déduction: Total={total_line_price_val}, Unit={unit_price_val} (single value, Qty=1 check)")
                 else:
                     total_line_price_val = None
                     unit_price_val = None
-                    print("Dédution: Pas assez de prix trouvés.")
+                    print("Déduction: Pas assez de prix trouvés.")
                 
                 print("--- Fin du débogage des prix/quantités ---")
 
@@ -216,17 +211,16 @@ def process_table_fields(full_text_for_table, rules):
             # --- Extract and clean Description (CMDCodetNom) ---
             description_raw = item_raw_content
             
-            # Remove detected quantity string occurrences. Use original matched string for removal.
+            # Remove detected quantity string occurrences
             if quantity_match:
                 description_raw = description_raw.replace(quantity_match.group(0), '', 1) 
             
-            # Remove "Prix brut" and the associated price lines from description_raw
+            # Remove "Prix brut" and the associated price lines
             if price_start_match:
                 description_raw = re.sub(r"Prix\s*brut", "", description_raw, flags=re.IGNORECASE | re.DOTALL)
                 
                 elements_to_remove_from_description = []
                 for s_val_to_remove in all_raw_price_strings_in_segment: 
-                    # Add optional EUR/units as they might be present in the raw text and need removal
                     elements_to_remove_from_description.append(r'\s*' + re.escape(s_val_to_remove) + r'(?:\s*EUR)?(?:\s*PC|\s*U|\s*UNITE|\s*UNITES)?\s*')
                 
                 elements_to_remove_from_description.sort(key=len, reverse=True) 
@@ -263,7 +257,7 @@ def process_table_fields(full_text_for_table, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.19.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.20.0", "rules_loaded": bool(extraction_rules)}), 200
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
@@ -281,7 +275,7 @@ def extract_document():
         pages_raw_text = []
         try:
             pages_raw_text = extract_text_from_pdf_per_page(file_stream)
-            full_text_raw = "\n".join(pages_raw_text) # Concaténer tout le texte pour les champs généraux
+            full_text_raw = "\n".join(pages_raw_text)
             print(f"Texte extrait directement (longueur: {len(full_text_raw)}).")
             print("--- DÉBUT DU TEXTE BRUT DU PDF (pour débogage) ---")
             print(full_text_raw)
@@ -291,45 +285,27 @@ def extract_document():
             pages_raw_text = []
             full_text_raw = ""
 
-        # --- ÉTAPE 2: Pré-traitement et nettoyage de chaque page pour les données de tableau ---
+        # --- ÉTAPE 2: Pré-traitement MINIMAL pour les données de tableau ---
+        # On va être beaucoup moins agressif dans le nettoyage
         cleaned_pages_for_table = []
         
-        # Regex pour les éléments à supprimer par page. Elles sont moins agressives maintenant.
-        page_header_pattern_start = r"(?:Commande de livraison\s*N°\s*\d{4}-\d{10,}\s*\(A\s*rappeler\s*dans\s*toute\s*correspondance\))"
-        page_footer_pattern_start = r"(?:Enedis,\s*SA\s*à\s*directoire(?:.|\n)*?PAGE\s*\d+\s*\/\s*\d+)" # Capture full footer block
-
         for i, page_text in enumerate(pages_raw_text):
             cleaned_page_content = page_text
             
-            # Remove main document header (only if on page 1)
-            if i == 0: # Only on the first page, remove the main header block
-                match_header = re.search(page_header_pattern_start, cleaned_page_content, re.IGNORECASE | re.DOTALL)
-                if match_header:
-                    cleaned_page_content = cleaned_page_content.replace(match_header.group(0), '', 1) # Remove the header block
-                    print(f"INFO: Removed main header from page {i+1}.")
+            # Supprimer seulement les pieds de page
+            page_footer_pattern = r"Enedis,\s*SA\s*à\s*directoire(?:.|\n)*?PAGE\s*\d+\s*\/\s*\d+"
+            cleaned_page_content = re.sub(page_footer_pattern, "", cleaned_page_content, flags=re.IGNORECASE | re.DOTALL)
             
-            # Remove main document footer from each page
-            match_footer = re.search(page_footer_pattern_start, cleaned_page_content, re.IGNORECASE | re.DOTALL)
-            if match_footer:
-                cleaned_page_content = cleaned_page_content.replace(match_footer.group(0), '', 1) # Remove the footer block
-                print(f"INFO: Removed footer from page {i+1}.")
-            
-            # Remove general table header line if it appears on a page (to keep item content clean)
-            # This is specific for the "Désignation | Quantité | P.U. HT | Montant HT" line.
-            # Only remove it if it's the *only* thing on the line or very prominent, to avoid affecting item names.
-            # It should ideally be handled by table_start_marker_regex in process_table_fields, but removing here too.
-            # For now, let's keep this out, as it might remove item descriptions if they match.
-            # The previous table_start_marker_regex in process_table_fields takes care of the header *before* splitting items.
-
-            # Remove separator lines that appear frequently - This is usually safe.
-            cleaned_page_content = re.sub(r"________________.*", "", cleaned_page_content, flags=re.DOTALL)
+            # Supprimer les lignes de séparation
+            cleaned_page_content = re.sub(r"_{10,}", "", cleaned_page_content)
             
             cleaned_pages_for_table.append(cleaned_page_content.strip())
         
         # Concaténer les pages nettoyées pour le traitement du tableau
         full_text_cleaned_for_table = "\n".join(cleaned_pages_for_table) 
+        
         print(f"--- Texte nettoyé pour le tableau (longueur: {len(full_text_cleaned_for_table)}) ---")
-        print(full_text_cleaned_for_table[:1500]) # Print more characters for debug
+        print(full_text_cleaned_for_table)
         print("--- Fin du texte nettoyé pour le tableau ---")
 
         if not full_text_cleaned_for_table.strip():
