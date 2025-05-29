@@ -1,4 +1,4 @@
-# scripts/start_api.py
+# start_api.py
 #
 # Version: 1.4.0
 # Date: 2025-05-30
@@ -7,17 +7,75 @@
 #              Initialise les règles d'extraction, gère la lecture des PDF et l'application des règles.
 #              Expose un endpoint /health et un endpoint /extract pour le traitement des documents.
 
-# ... (imports inchangés)
+from flask import Flask, request, jsonify
+import os
+import json
+import io
+import re
+from pdfminer.high_level import extract_pages
+from pdfminer.layout import LTTextContainer, LTChar, LTFigure
+from PIL import Image
+import pytesseract
 
 app = Flask(__name__)
 
-# ... (RULES_FILE_PATH et extraction_rules chargement inchangés)
+# Chemin vers le fichier de règles d'extraction
+RULES_FILE_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'extraction-rules.json')
+
+# Chargement des règles d'extraction au démarrage de l'application
+extraction_rules = {}
+if os.path.exists(RULES_FILE_PATH):
+    try:
+        with open(RULES_FILE_PATH, 'r', encoding='utf-8') as f:
+            extraction_rules = json.load(f)
+        print(f"Règles d'extraction chargées depuis: {RULES_FILE_PATH}")
+    except json.JSONDecodeError as e:
+        print(f"ERREUR: Erreur de format JSON dans '{RULES_FILE_PATH}': {e}. L'extraction sera vide.")
+    except Exception as e:
+        print(f"ERREUR: Impossible de charger les règles '{RULES_FILE_PATH}': {e}. L'extraction sera vide.")
+else:
+    print(f"ATTENTION: Fichier de règles '{RULES_FILE_PATH}' introuvable. L'extraction sera vide.")
 
 # --- Fonctions d'extraction ---
 
-# ... (extract_text_from_pdf et extract_text_with_ocr inchangées)
+def extract_text_from_pdf(pdf_stream):
+    """Extrait tout le texte d'un PDF en utilisant pdfminer.six."""
+    text_content = ""
+    # Réinitialise le stream au début pour la lecture par pdfminer.six
+    pdf_stream.seek(0)
+    for page_layout in extract_pages(pdf_stream):
+        for element in page_layout:
+            if isinstance(element, LTTextContainer):
+                text_content += element.get_text() + "\n"
+    pdf_stream.seek(0) # Réinitialise le stream à nouveau si d'autres lectures sont prévues
+    return text_content
 
-# ... (process_general_fields inchangée)
+def extract_text_with_ocr(image):
+    """Applique l'OCR sur une image."""
+    # Pour une meilleure précision, on peut pré-traiter l'image (resize, binarisation)
+    # Mais pour commencer, on utilise Tesseract directement
+    return pytesseract.image_to_string(image, lang='fra')
+
+def process_general_fields(full_text, rules):
+    """Extrait les champs généraux du texte en utilisant les règles."""
+    extracted_data = {}
+    for rule in rules.get("general_fields", []):
+        field_name = rule["field_name"]
+        patterns = rule["patterns"]
+        value = None
+        for pattern_str in patterns:
+            match = re.search(pattern_str, full_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                value = match.group(1).strip()
+                if rule["type"] == "float":
+                    value = value.replace(' ', '').replace('.', '').replace(',', '.') 
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        value = None 
+                break 
+        extracted_data[field_name] = value
+    return extracted_data
 
 def process_table_fields(full_text, rules):
     """
@@ -31,18 +89,9 @@ def process_table_fields(full_text, rules):
     table_rules = rules.get("table_fields", {})
     columns_info = table_rules.get("columns", [])
 
-    # --- MODIFICATION ICI : On ne délimite plus la section du tableau par mots-clés ---
-    # Nous allons passer le texte brut complet ou une section plus large pour que la regex de ligne opère.
-    # Pour un document multi-pages, le tableau commence généralement après le "Désignation" de la page 2.
-    # Nous allons chercher le premier en-tête de tableau ("Désignation") et commencer l'analyse après.
-
-    # Rechercher le premier "Désignation" ou "Quantité" pour marquer le début potentiel du tableau
-    # On rend cette recherche plus flexible pour capturer la partie après l'en-tête de la page 2
+    # Nous allons chercher le premier "Désignation" ou "Quantité" pour marquer le début potentiel du tableau.
     # L'objectif est de commencer à parser APRES la ligne d'en-têtes de colonnes.
     
-    # Trouver l'index du début de la section des tableaux (ex: "Désignation Quantité | P.U. HT")
-    # Utiliser un des start_keywords pour identifier le début de l'en-tête du tableau.
-    # On va chercher la ligne contenant "Désignation" OU "Quantité" et prendre tout ce qui suit.
     table_start_marker_regex = r"(D\u00e9signation|Désignation|Quantit\u00e9|Quantité|P\.U\.\s*HT|Montant\s*HT).*?\n"
     match_table_start = re.search(table_start_marker_regex, full_text, re.IGNORECASE | re.DOTALL)
 
@@ -56,9 +105,6 @@ def process_table_fields(full_text, rules):
 
     # Simplification : Traiter chaque ligne non vide comme une ligne potentielle du tableau
     lines = [line.strip() for line in table_text.split('\n') if line.strip()]
-
-    # ... (le reste de la fonction process_table_fields, y compris la regex line_pattern et la fonction parse_numeric_value)
-    # Assure-toi que la variable `line_pattern` est la plus récente que je t'ai fournie.
 
     for line in lines:
         row_data = {}
@@ -76,7 +122,6 @@ def process_table_fields(full_text, rules):
             r"(\d+(?:[.,]\d+)?)\s*EUR$" # Group 6: Total Line Price (number with . or , decimal, EUR, end of line)
             , re.IGNORECASE | re.DOTALL # DOTALL is crucial for multi-line descriptions
         )
-        # ... (le reste de la boucle for pour le match et l'extraction des groupes)
 
         match = line_pattern.search(line)
         if match:
