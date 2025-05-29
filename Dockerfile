@@ -23,8 +23,8 @@ WORKDIR /app
 COPY . /app
 
 # Phase 4: Python Dependencies
-# Installe les bibliothèques Python nécessaires pour notre API Flask.
-RUN pip install --no-cache-dir Pillow requests flask
+# Installe les bibliothèques Python nécessaires pour notre API Flask, l'OCR et la lecture de PDF.
+RUN pip install --no-cache-dir Pillow requests flask pytesseract pdfminer.six
 
 # Phase 5: Expose Port
 # Le port que l'application Docling API exposera.
