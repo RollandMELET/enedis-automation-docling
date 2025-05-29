@@ -1,3 +1,12 @@
+# start_api.py
+#
+# Version: 1.2.0
+# Date: 2025-05-29
+# Author: Rolland MELET & AI Senior Coder
+# Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
+#              Initialise les règles d'extraction, gère la lecture des PDF et l'application des règles.
+#              Expose un endpoint /health et un endpoint /extract pour le traitement des documents.
+
 from flask import Flask, request, jsonify
 import os
 import json
@@ -61,13 +70,13 @@ def process_general_fields(full_text, rules):
             if match:
                 value = match.group(1).strip()
                 if rule["type"] == "float":
-                    value = value.replace('.', '').replace(',', '.') # Gère les séparateurs décimaux
+                    # Supprime tous les espaces (milliers) et remplace la virgule par un point (décimal)
+                    value = value.replace(' ', '').replace('.', '').replace(',', '.') 
                     try:
                         value = float(value)
                     except ValueError:
                         value = None # Garde la valeur None si la conversion échoue
                 # Ajout de la gestion du format de date (ici on garde la string, la conversion peut être faite dans n8n)
-                # ou tu peux ajouter une conversion ici si tu veux un objet date précis
                 break # Une fois un match trouvé, on passe à la règle suivante (pour ce champ)
         extracted_data[field_name] = value
     return extracted_data
@@ -96,9 +105,9 @@ def process_table_fields(full_text, rules):
             "CMDCodetTotlaLinePrice": 10000.00
         },
         {
-            "CMDCodetPosition": "2",
             "CMDCodet": "6424704",
             "CMDCodetNom": "TR 400 C 20 KV PR S27",
+            "CMDCodetPosition": "2",
             "CMDCodetQuantity": 1,
             "CMDCodetUnitPrice": 5000.00,
             "CMDCodetTotlaLinePrice": 5000.00
@@ -129,6 +138,11 @@ def extract_document():
             # Tenter d'extraire le texte directement (si PDF textuel)
             full_text = extract_text_from_pdf(file_stream)
             print(f"Texte extrait directement (longueur: {len(full_text)}).")
+            # --- DÉBUT DU TEXTE BRUT DU PDF (pour débogage) ---
+            print("--- DÉBUT DU TEXTE BRUT DU PDF (pour débogage) ---")
+            print(full_text) # Cette ligne affiche le texte brut dans les logs Coolify
+            print("--- FIN DU TEXTE BRUT DU PDF ---")
+            # --- FIN DU TEXTE BRUT DU PDF ---
 
             # Optionnel: Si le texte est très court ou vide, tenter l'OCR
             # Pour l'instant, on assume que si le texte est là, on l'utilise.
@@ -154,7 +168,7 @@ def extract_document():
         extracted_output = {
             "CMDRefEnedis": general_data.get("CMDRefEnedis"),
             "CMDDateCommande": general_data.get("CMDDateCommande"),
-            "TotalHT": general_data.get("CMDTotalHT"),
+            "TotalHT": general_data.get("TotalHT"), # Utilise le nom de champ correct pour la réponse
             "line_items": line_items_data,
             "confidence_score": 0.85, # Score de confiance simulé
             "extracted_from": file.filename,
