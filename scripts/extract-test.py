@@ -1,20 +1,20 @@
 # scripts/extract-test.py
 #
-# Version: 1.2.0
+# Version: 1.3.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
-# Description: Script pour envoyer un PDF à l'API Docling locale et afficher la sortie JSON.
-#              Accepte maintenant un nom de fichier PDF en argument.
+# Description: Script pour envoyer un PDF à l'API Docling locale ou publique et afficher la sortie JSON.
+#              Mis à jour pour tester l'API Docling déployée sur Coolify.
 
 import requests
 import json
 import os
 import sys
 
-# --- Configuration de l'URL de l'API Docling locale ---
+# --- Configuration de l'URL de l'API Docling publique ---
 # Pour tester en local, utilisez "http://localhost:5001"
-# Pour tester l'API déployée sur Coolify, utilisez "https://enedis-automation-docling.rorworld.eu"
-DOCLING_API_BASE_URL = "http://localhost:5001"
+# Pour tester l'API déployée sur Coolify, utilisez l'URL de votre application
+DOCLING_API_BASE_URL = "https://enedis-automation-docling.rorworld.eu" # <--- MODIFIEZ CETTE LIGNE
 
 # --- Vérification des arguments de ligne de commande ---
 if len(sys.argv) < 2:
