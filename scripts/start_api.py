@@ -1,10 +1,10 @@
 # scripts/start_api.py
 #
-# Version: 1.24.0
+# Version: 1.25.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
-#              Version avec nettoyage amélioré de la zone du tableau.
+#              Version avec nettoyage amélioré de la zone du tableau et des blocs d'articles.
 
 from flask import Flask, request, jsonify
 import os
@@ -86,7 +86,7 @@ def process_table_fields(full_text_for_table, rules):
     """
     Extrait les champs de tableau du texte pré-nettoyé page par page.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.24.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.25.0).") # Updated version
     
     table_data = []
     
@@ -136,6 +136,12 @@ def process_table_fields(full_text_for_table, rules):
             item_raw_content = re.sub(r"Enedis,\s*SA\s*à\s*directoire(?:.|\n)*?PAGE\s*\d+\s*\/\s*\d+", "", item_raw_content, flags=re.IGNORECASE | re.DOTALL)
             item_raw_content = re.sub(r"________________.*", "", item_raw_content, flags=re.DOTALL) # Lignes de séparateurs résiduelles
 
+            # Nettoyage additionnel pour les résidus spécifiques trouvés dans Commande_4801377867JPSM2025-03-19.PDF
+            # Ces patterns sont mis à jour pour être plus robustes et supprimer les lignes entières
+            item_raw_content = re.sub(r"^#TAB/STOC/\(\d+\)\d+#\s*TAB\s*HTA\s*INSENSIBLE\s*\dI\+P\s*INSTRUMENT\u00c9\s*$", "", item_raw_content, flags=re.IGNORECASE | re.MULTILINE)
+            item_raw_content = re.sub(r"^#TFO/SANS/#\s*$", "", item_raw_content, flags=re.IGNORECASE | re.MULTILINE)
+            item_raw_content = re.sub(r"^\s*__\s*$", "", item_raw_content, flags=re.MULTILINE) # Supprime les doubles underscores seuls sur une ligne
+
             # Après ce nettoyage précoce, on re-stripe et re-print pour le débogage
             item_raw_content = item_raw_content.strip() 
             print(f"DEBUG: Contenu brut de l'article APRES nettoyage précoce:\n{item_raw_content}")
@@ -169,7 +175,9 @@ def process_table_fields(full_text_for_table, rules):
                 text_after_prix_brut = item_raw_content[price_start_match.end():].strip()
                 print(f"Texte après 'Prix brut':\n{text_after_prix_brut}")
                 
-                price_number_pattern_str = r"\d{1,3}(?:[ .]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?"
+                # Pattern plus strict pour les prix, assurant qu'il s'agit de nombres autonomes et non de parties de codes.
+                # Utilise \b pour les limites de mot pour ne pas matcher "90" dans "7395070" si c'est collé.
+                price_number_pattern_str = r"\b\d{1,3}(?:[ .]\d{3})*(?:[.,]\d+)?\b" 
 
                 all_raw_price_strings_in_segment = re.findall(
                     r"(" + price_number_pattern_str + r")",
@@ -248,7 +256,11 @@ def process_table_fields(full_text_for_table, rules):
             description_raw = re.sub(r"^\s*Désignation\s*\|\s*Quantité\s*\|\s*P\.U\.\s*HT\s*\|\s*Montant\s*HT\s*$", "", description_raw, flags=re.IGNORECASE | re.MULTILINE)
             description_raw = re.sub(r"^\s*\|\s*EUR\s*\|\s*EUR\s*$", "", description_raw, flags=re.IGNORECASE | re.MULTILINE) # The line with only EUR|EUR
 
-
+            # Nettoyage additionnel (répété pour description)
+            description_raw = re.sub(r"^#TAB/STOC/\(\d+\)\d+#\s*TAB\s*HTA\s*INSENSIBLE\s*\dI\+P\s*INSTRUMENT\u00c9\s*$", "", description_raw, flags=re.IGNORECASE | re.MULTILINE)
+            description_raw = re.sub(r"^#TFO/SANS/#\s*$", "", description_raw, flags=re.IGNORECASE | re.MULTILINE)
+            description_raw = re.sub(r"^\s*__\s*$", "", description_raw, flags=re.MULTILINE) # Supprime les doubles underscores seuls sur une ligne
+            
             description_raw = description_raw.strip()
             description_raw = description_raw.replace('\n', ' ') # Convert newlines to spaces for a single line description
             description_raw = re.sub(r'\s{2,}', ' ', description_raw) # Clean up multiple spaces again
@@ -275,7 +287,7 @@ def process_table_fields(full_text_for_table, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.24.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.25.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
