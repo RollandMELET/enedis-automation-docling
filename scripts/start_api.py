@@ -1,10 +1,10 @@
 # scripts/start_api.py
 #
-# Version: 1.25.0
+# Version: 1.26.0
 # Date: 2025-05-30
 # Author: Rolland MELET & AI Senior Coder
 # Description: API Flask pour le moteur d'extraction de commandes ENEDIS.
-#              Version avec nettoyage amélioré de la zone du tableau et des blocs d'articles.
+#              Version avec nettoyage amélioré des blocs d'articles et extraction des champs généraux complets.
 
 from flask import Flask, request, jsonify
 import os
@@ -73,9 +73,15 @@ def process_general_fields(full_text, rules):
         patterns = rule["patterns"]
         value = None
         for pattern_str in patterns:
-            match = re.search(pattern_str, full_text, re.IGNORECASE | re.DOTALL)
+            # Gérer les champs multi-lignes en utilisant re.DOTALL pour que . match les newlines
+            flags = re.IGNORECASE | re.DOTALL
+            match = re.search(pattern_str, full_text, flags)
             if match:
                 value = match.group(1).strip()
+                if rule.get("multiline"):
+                    # Pour les champs multi-lignes, on nettoie les espaces multiples et les lignes vides
+                    value = re.sub(r'\s{2,}', ' ', value) # Remplace les multiples espaces par un seul
+                    value = re.sub(r'\n+', '\n', value).strip() # Réduit les lignes vides à une seule ou supprime les au début/fin
                 if rule["type"] == "float":
                     value = parse_numeric_value(value) 
                 break 
@@ -86,7 +92,7 @@ def process_table_fields(full_text_for_table, rules):
     """
     Extrait les champs de tableau du texte pré-nettoyé page par page.
     """
-    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.25.0).") # Updated version
+    print("INFO: Tentative d'extraction de tableau par blocs d'articles (Version 1.26.0).") # Updated version
     
     table_data = []
     
@@ -287,7 +293,7 @@ def process_table_fields(full_text_for_table, rules):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Endpoint de vérification de santé (FR-5.2)."""
-    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.25.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
+    return jsonify({"status": "healthy", "service": "Docling API", "version": "1.26.0", "rules_loaded": bool(extraction_rules)}), 200 # Updated version
 
 @app.route('/extract', methods=['POST'])
 def extract_document():
@@ -347,12 +353,12 @@ def extract_document():
                 full_text_cleaned_for_table = full_text_raw[table_start_match.start() : table_end_index_absolute]
                 print(f"INFO: Tableau délimité avec succès entre marqueurs. Longueur avant nettoyage: {len(full_text_cleaned_for_table)}")
             else:
-                # Si aucune fin spécifique n'est trouvée, prendre tout le reste après le début du tableau
+                # If no specific end found, take all remaining after table start
                 full_text_cleaned_for_table = full_text_raw[table_start_match.start():]
                 print("ATTENTION: Aucune fin de tableau standard détectée. Le tableau pourrait inclure du texte indésirable jusqu'à la fin du document.")
         else:
             print("ATTENTION: Marqueur de début de tableau non trouvé. L'extraction de tableau sera vide.")
-            full_text_cleaned_for_table = "" # S'assurer qu'il est vide si pas de début
+            full_text_cleaned_for_table = "" # Ensure it's empty if no start
 
 
         # --- Nettoyage FINAL de la section du tableau isolée ---
@@ -409,6 +415,14 @@ def extract_document():
             "CMDRefEnedis": general_data.get("CMDRefEnedis"),
             "CMDDateCommande": general_data.get("CMDDateCommande"),
             "TotalHT": general_data.get("TotalHT"),
+            "EnedisCompanyName": general_data.get("EnedisCompanyName"),
+            "EnedisCompanyAddress": general_data.get("EnedisCompanyAddress"),
+            "EnedisContactPerson": general_data.get("EnedisContactPerson"),
+            "EnedisContactPhone": general_data.get("EnedisContactPhone"),
+            "DuhaldeCompanyName": general_data.get("DuhaldeCompanyName"),
+            "DuhaldeCompanyAddress": general_data.get("DuhaldeCompanyAddress"),
+            "DuhaldeSIRET": general_data.get("DuhaldeSIRET"),
+            "DeliveryLocationAddress": general_data.get("DeliveryLocationAddress"),
             "line_items": line_items_data,
             "confidence_score": 0.95, # Augmenté le score de confiance pour une meilleure extraction
             "extracted_from": file.filename,
