@@ -14,7 +14,7 @@ import sys
 # --- Configuration de l'URL de l'API Docling publique ---
 # Pour tester en local, utilisez "http://localhost:5001"
 # Pour tester l'API déployée sur Coolify, utilisez l'URL de votre application
-DOCLING_API_BASE_URL = "https://enedis-automation-docling.rorworld.eu" # <--- MODIFIEZ CETTE LIGNE
+DOCLING_API_BASE_URL = "https://enedis-automation-docling.rorworld.eu" # <--- L'URL PUBLIQUE ICI
 
 # --- Vérification des arguments de ligne de commande ---
 if len(sys.argv) < 2:
